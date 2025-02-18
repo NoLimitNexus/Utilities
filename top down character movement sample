@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dot Behavior</title>
+  <title>Dot Behavior with Projectiles and Fixed Camera</title>
   <style>
     body {
       margin: 0;
@@ -62,31 +62,62 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
+    // Prevent the context menu from appearing on right-click.
+    renderer.domElement.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+
+    // ----- Create the Player Dot First -----
+    const dotGeo = new THREE.SphereGeometry(5, 16, 16);
+    const dotMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(currentDotColor) });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    scene.add(dot);
+    dot.position.set(0, 5, 0); // Hovering slightly above the ground
+
+    // ----- OrbitControls (Modified) -----
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    // (Optional) Set the target so the camera generally looks at the dot.
-    controls.target.copy(new THREE.Vector3(0, 5, 0));
+    // Disable panning so the camera doesn't slide sideways.
+    controls.enablePan = false;
+    // Configure the mouse buttons so that only the right button rotates.
+    controls.mouseButtons = {
+      ORBIT: THREE.MOUSE.RIGHT,
+      ZOOM: THREE.MOUSE.MIDDLE,
+      PAN: null
+    };
+
+    // Set the OrbitControls target to the dot.
+    controls.target.copy(dot.position);
+
+    // Lock vertical rotation (only allow turning left/right).
+    // Compute the current polar angle from the dot to the camera.
+    const offset = new THREE.Vector3().subVectors(camera.position, dot.position);
+    const polarAngle = Math.acos(offset.y / offset.length());
+    controls.minPolarAngle = polarAngle;
+    controls.maxPolarAngle = polarAngle;
 
     // ----- Lighting -----
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    // ----- Ground (Grid) -----
-    const gridSize = 500;
-    const gridDivisions = 10;
-    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 500, 200);
+    scene.add(directionalLight);
+
+    // ----- Ground (Large Floor) -----
+    const floorSize = 2000;
+    const floorGeo = new THREE.PlaneGeometry(floorSize, floorSize);
+    const floorMat = new THREE.MeshLambertMaterial({ color: 0x444444, side: THREE.DoubleSide });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = - Math.PI / 2;
+    scene.add(floor);
+
+    // (Optional) Also add a grid helper for visual reference.
+    const gridHelper = new THREE.GridHelper(floorSize, 50);
     scene.add(gridHelper);
 
-    // ----- Dot Creation -----
-    const dotGeo = new THREE.SphereGeometry(5, 8, 8);
-    const dotMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(currentDotColor) });
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    scene.add(dot);
-
-    dot.position.set(0, 5, 0); // Hovering above the ground
-
-    // ----- Movement Controls -----
+    // ----- Movement Controls for the Dot -----
     const speed = 5;
     let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
 
@@ -104,31 +135,119 @@
       if (event.key === 'd') moveRight = false;
     });
 
-    // ----- Updated Movement Function -----
     function moveDot() {
-      // Get the camera's current forward direction
+      // Compute camera's horizontal forward vector.
       const forward = new THREE.Vector3();
       camera.getWorldDirection(forward);
-      // Ignore vertical component so movement stays on the ground
       forward.y = 0;
       forward.normalize();
 
-      // Compute the right vector relative to the camera
+      // Compute right vector from camera.
       const right = new THREE.Vector3();
-      // Using up (0,1,0) ensures horizontal strafing.
       right.crossVectors(forward, camera.up).normalize();
 
-      // Build the movement vector based on key presses
       let moveVector = new THREE.Vector3();
       if (moveForward) moveVector.add(forward);
       if (moveBackward) moveVector.sub(forward);
       if (moveRight) moveVector.add(right);
       if (moveLeft) moveVector.sub(right);
 
-      // If any movement is requested, normalize and apply speed.
       if (moveVector.length() > 0) {
         moveVector.normalize();
-        dot.position.add(moveVector.multiplyScalar(speed));
+        const delta = moveVector.clone().multiplyScalar(speed);
+        // Move the dot.
+        dot.position.add(delta);
+        // Also translate the camera by the same delta so the offset remains fixed.
+        camera.position.add(delta);
+        // Update the OrbitControls target.
+        controls.target.copy(dot.position);
+      }
+    }
+
+    // ----- Projectile Logic -----
+    const projectiles = [];
+    const gravity = 0.3;
+    const bounceDamping = 0.7;
+    const friction = 0.98; // Horizontal friction on bounce
+
+    function createProjectile(startPos, direction) {
+      const projectileRadius = 3;
+      const projectileGeo = new THREE.SphereGeometry(projectileRadius, 8, 8);
+      // Use the current dot color; enable transparency for fading.
+      const projectileMat = new THREE.MeshLambertMaterial({ color: currentDotColor, transparent: true, opacity: 1 });
+      const projectileMesh = new THREE.Mesh(projectileGeo, projectileMat);
+      projectileMesh.position.copy(startPos);
+
+      // Give the projectile an initial speed.
+      const projectileSpeed = 15;
+      const velocity = direction.clone().multiplyScalar(projectileSpeed);
+
+      const projectile = {
+        mesh: projectileMesh,
+        velocity: velocity,
+        bounceCount: 0,
+        radius: projectileRadius
+      };
+
+      projectiles.push(projectile);
+      scene.add(projectileMesh);
+    }
+
+    // On a left click, shoot a projectile from the player's dot.
+    renderer.domElement.addEventListener('click', (event) => {
+      // Calculate normalized device coordinates.
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      // Set up a raycaster using the mouse coordinates.
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      // Define a ground plane at y = 0.
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const intersectionPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
+
+      // Determine the direction from the player's dot to the intersection point.
+      const projectileDirection = new THREE.Vector3().subVectors(intersectionPoint, dot.position).normalize();
+      // Add an upward boost so the projectile makes a nice arc.
+      projectileDirection.y += 0.3;
+      projectileDirection.normalize();
+
+      createProjectile(dot.position.clone(), projectileDirection);
+    });
+
+    // Update each projectile's motion.
+    function updateProjectiles() {
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        // Apply gravity.
+        p.velocity.y -= gravity;
+        // Update position.
+        p.mesh.position.add(p.velocity);
+
+        // Check collision with the ground.
+        if (p.mesh.position.y <= p.radius) {
+          p.mesh.position.y = p.radius;
+          p.velocity.y = -p.velocity.y * bounceDamping;
+          p.velocity.x *= friction;
+          p.velocity.z *= friction;
+          p.bounceCount++;
+
+          // After a few bounces, start fading out the projectile.
+          if (p.bounceCount >= 3) {
+            p.mesh.material.opacity -= 0.02;
+          }
+        }
+
+        // Remove projectile if fully faded.
+        if (p.mesh.material.opacity <= 0) {
+          scene.remove(p.mesh);
+          projectiles.splice(i, 1);
+        }
       }
     }
 
@@ -143,7 +262,8 @@
     function animate() {
       requestAnimationFrame(animate);
       
-      moveDot(); // Update dot position based on keypress
+      moveDot();           // Update the player dot (and camera) position.
+      updateProjectiles(); // Update any active projectiles.
 
       controls.update();
       renderer.render(scene, camera);
