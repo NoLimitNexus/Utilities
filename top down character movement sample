@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dot Behavior</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #222;
+    }
+    canvas {
+      display: block;
+    }
+    /* Dark mode panel in top left */
+    #colorPanel {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+      font-family: sans-serif;
+      font-size: 14px;
+    }
+    #colorPanel label {
+      margin-right: 5px;
+    }
+    #colorPanel div {
+      margin-bottom: 5px;
+    }
+  </style>
+  <!-- Three.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- OrbitControls -->
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <!-- Dark Mode Panel -->
+  <div id="colorPanel">
+    <div>
+      <label for="dotColorPicker">Color:</label>
+      <!-- Default color changed to bright blue (#009EFF) -->
+      <input type="color" id="dotColorPicker" value="#009EFF">
+    </div>
+  </div>
+
+  <script>
+    let currentDotColor = "#009EFF";
+
+    // ----- Scene, Camera, Renderer -----
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      75, window.innerWidth / window.innerHeight, 0.1, 3000
+    );
+    camera.position.set(0, 200, 500);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    // (Optional) Set the target so the camera generally looks at the dot.
+    controls.target.copy(new THREE.Vector3(0, 5, 0));
+
+    // ----- Lighting -----
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    // ----- Ground (Grid) -----
+    const gridSize = 500;
+    const gridDivisions = 10;
+    const gridHelper = new THREE.GridHelper(gridSize, gridDivisions);
+    scene.add(gridHelper);
+
+    // ----- Dot Creation -----
+    const dotGeo = new THREE.SphereGeometry(5, 8, 8);
+    const dotMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(currentDotColor) });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    scene.add(dot);
+
+    dot.position.set(0, 5, 0); // Hovering above the ground
+
+    // ----- Movement Controls -----
+    const speed = 5;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'w') moveForward = true;
+      if (event.key === 's') moveBackward = true;
+      if (event.key === 'a') moveLeft = true;
+      if (event.key === 'd') moveRight = true;
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (event.key === 'w') moveForward = false;
+      if (event.key === 's') moveBackward = false;
+      if (event.key === 'a') moveLeft = false;
+      if (event.key === 'd') moveRight = false;
+    });
+
+    // ----- Updated Movement Function -----
+    function moveDot() {
+      // Get the camera's current forward direction
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      // Ignore vertical component so movement stays on the ground
+      forward.y = 0;
+      forward.normalize();
+
+      // Compute the right vector relative to the camera
+      const right = new THREE.Vector3();
+      // Using up (0,1,0) ensures horizontal strafing.
+      right.crossVectors(forward, camera.up).normalize();
+
+      // Build the movement vector based on key presses
+      let moveVector = new THREE.Vector3();
+      if (moveForward) moveVector.add(forward);
+      if (moveBackward) moveVector.sub(forward);
+      if (moveRight) moveVector.add(right);
+      if (moveLeft) moveVector.sub(right);
+
+      // If any movement is requested, normalize and apply speed.
+      if (moveVector.length() > 0) {
+        moveVector.normalize();
+        dot.position.add(moveVector.multiplyScalar(speed));
+      }
+    }
+
+    // ----- Update Dot Color from the Color Picker -----
+    const colorPicker = document.getElementById("dotColorPicker");
+    colorPicker.addEventListener("input", (event) => {
+      currentDotColor = event.target.value;
+      dot.material.color.set(currentDotColor);
+    });
+
+    // ----- Animation Loop -----
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      moveDot(); // Update dot position based on keypress
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // ----- Window Resize Handling -----
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
