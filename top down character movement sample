@@ -49,9 +49,7 @@
 
     // ----- Scene, Camera, Renderer -----
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth/window.innerHeight, 0.1, 3000
-    );
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 3000);
     const renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
@@ -175,11 +173,10 @@
     });
 
     // ----- Camera Setup -----
-    // We'll keep the camera behind the player (ignoring pitch for horizontal offset),
-    // and now as the camera zooms out, it also rises using a fixed vertical angle.
+    // We'll keep the camera behind the player (ignoring pitch for horizontal offset)
+    // and have it rise as it zooms out using a fixed angle.
     let cameraDistance = 150; // start further out
-    // Use a fixed angle (20° above horizontal) for the camera's offset.
-    const cameraAngle = THREE.Math.degToRad(20);
+    const cameraAngle = THREE.Math.degToRad(20); // fixed angle for vertical offset
     renderer.domElement.addEventListener("wheel", (evt) => {
       cameraDistance += evt.deltaY * 0.05;
       cameraDistance = Math.max(50, Math.min(300, cameraDistance));
@@ -188,9 +185,10 @@
     // ----- Projectiles -----
     const projectiles = [];
     const gravity = 0.3;
-    const bounceDamping = 0.7;
-    const friction = 0.98;
-
+    // Increase bounce elasticity for more dramatic bouncing:
+    const bounceDamping = 0.9; // Increased from 0.7 to 0.9 for higher bounces
+    // Reduce friction to maintain horizontal speed:
+    const friction = 0.95;     // Reduced from 0.98 to 0.95
     function createProjectile(startPos, direction) {
       const projectileRadius = 3;
       const projectileGeo = new THREE.SphereGeometry(projectileRadius, 8, 8);
@@ -281,7 +279,7 @@
 
     // ----- Player & Camera Update -----
     function updatePlayerAndCamera() {
-      // Incorporate key rotation (Q/E) with increased speed and inverted:
+      // Incorporate key rotation (Q/E) with increased speed:
       const keyRotationSpeed = 0.04;
       if(turnLeft) { yaw -= keyRotationSpeed; }
       if(turnRight) { yaw += keyRotationSpeed; }
@@ -308,7 +306,7 @@
       const flatForward = new THREE.Vector3(forwardVector.x, 0, forwardVector.z).normalize();
       const camX = dot.position.x - flatForward.x * cameraDistance;
       const camZ = dot.position.z - flatForward.z * cameraDistance;
-      // Here, as the camera zooms out, we compute the camera height based on a fixed angle.
+      // As the camera zooms out, it rises along a fixed angle.
       const camY = dot.position.y + cameraDistance * Math.tan(cameraAngle);
       camera.position.set(camX, camY, camZ);
       camera.lookAt(dot.position);
