@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dot Behavior with Projectiles and Fixed Camera</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Third-Person with Full 3D Rotation</title>
   <style>
     body {
       margin: 0;
@@ -13,12 +13,11 @@
     canvas {
       display: block;
     }
-    /* Dark mode panel in top left */
     #colorPanel {
       position: fixed;
       top: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0,0,0,0.8);
       color: white;
       padding: 10px;
       border-radius: 5px;
@@ -35,16 +34,13 @@
   </style>
   <!-- Three.js library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <!-- OrbitControls -->
-  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
   <!-- Dark Mode Panel -->
   <div id="colorPanel">
     <div>
       <label for="dotColorPicker">Color:</label>
-      <!-- Default color changed to bright blue (#009EFF) -->
-      <input type="color" id="dotColorPicker" value="#009EFF">
+      <input type="color" id="dotColorPicker" value="#009EFF"/>
     </div>
   </div>
 
@@ -54,226 +50,278 @@
     // ----- Scene, Camera, Renderer -----
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth / window.innerHeight, 0.1, 3000
+      75, window.innerWidth/window.innerHeight, 0.1, 3000
     );
-    camera.position.set(0, 200, 500);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Prevent the context menu from appearing on right-click.
-    renderer.domElement.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-    });
-
-    // ----- Create the Player Dot First -----
-    const dotGeo = new THREE.SphereGeometry(5, 16, 16);
-    const dotMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(currentDotColor) });
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    scene.add(dot);
-    dot.position.set(0, 5, 0); // Hovering slightly above the ground
-
-    // ----- OrbitControls (Modified) -----
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    // Disable panning so the camera doesn't slide sideways.
-    controls.enablePan = false;
-    // Configure the mouse buttons so that only the right button rotates.
-    controls.mouseButtons = {
-      ORBIT: THREE.MOUSE.RIGHT,
-      ZOOM: THREE.MOUSE.MIDDLE,
-      PAN: null
-    };
-
-    // Set the OrbitControls target to the dot.
-    controls.target.copy(dot.position);
-
-    // Lock vertical rotation (only allow turning left/right).
-    // Compute the current polar angle from the dot to the camera.
-    const offset = new THREE.Vector3().subVectors(camera.position, dot.position);
-    const polarAngle = Math.acos(offset.y / offset.length());
-    controls.minPolarAngle = polarAngle;
-    controls.maxPolarAngle = polarAngle;
+    // Prevent right-click context menu so we can drag with RMB
+    renderer.domElement.addEventListener("contextmenu", (evt) => evt.preventDefault());
 
     // ----- Lighting -----
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(0, 500, 200);
+    scene.add(dirLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(0, 500, 200);
-    scene.add(directionalLight);
-
-    // ----- Ground (Large Floor) -----
+    // ----- Ground -----
     const floorSize = 2000;
     const floorGeo = new THREE.PlaneGeometry(floorSize, floorSize);
     const floorMat = new THREE.MeshLambertMaterial({ color: 0x444444, side: THREE.DoubleSide });
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = - Math.PI / 2;
+    floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
 
-    // (Optional) Also add a grid helper for visual reference.
+    // Optional grid helper
     const gridHelper = new THREE.GridHelper(floorSize, 50);
     scene.add(gridHelper);
 
-    // ----- Movement Controls for the Dot -----
-    const speed = 5;
+    // ----- Player (Dot) -----
+    const dotGeo = new THREE.SphereGeometry(5, 16, 16);
+    const dotMat = new THREE.MeshLambertMaterial({ color: currentDotColor });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.position.set(0, 5, 0);
+    scene.add(dot);
+
+    // ----- Orientation Arrow -----
+    // Shows the player's 3D facing direction, including pitch.
+    const arrowLength = 50;
+    const arrowColor = 0xff0000; // red
+    const arrowHelper = new THREE.ArrowHelper(
+      new THREE.Vector3(0,0,-1), // initial direction
+      dot.position.clone(),
+      arrowLength,
+      arrowColor
+    );
+    scene.add(arrowHelper);
+
+    // ----- Player Orientation (Yaw & Pitch) -----
+    // yaw = 0 => facing -Z (away from camera, if camera is at +Z)
+    // pitch = 0 => horizontal
+    let yaw = 0;
+    let pitch = 0;  // We'll clamp pitch so it doesn't flip over.
+    const maxPitch = Math.PI * 0.5; // 90 degrees up/down
+
+    // Movement speed for walking
+    const moveSpeed = 5;
+    // Track WASD keys for movement
     let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-
-    window.addEventListener('keydown', (event) => {
-      if (event.key === 'w') moveForward = true;
-      if (event.key === 's') moveBackward = true;
-      if (event.key === 'a') moveLeft = true;
-      if (event.key === 'd') moveRight = true;
-    });
-
-    window.addEventListener('keyup', (event) => {
-      if (event.key === 'w') moveForward = false;
-      if (event.key === 's') moveBackward = false;
-      if (event.key === 'a') moveLeft = false;
-      if (event.key === 'd') moveRight = false;
-    });
-
-    function moveDot() {
-      // Compute camera's horizontal forward vector.
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
-      forward.y = 0;
-      forward.normalize();
-
-      // Compute right vector from camera.
-      const right = new THREE.Vector3();
-      right.crossVectors(forward, camera.up).normalize();
-
-      let moveVector = new THREE.Vector3();
-      if (moveForward) moveVector.add(forward);
-      if (moveBackward) moveVector.sub(forward);
-      if (moveRight) moveVector.add(right);
-      if (moveLeft) moveVector.sub(right);
-
-      if (moveVector.length() > 0) {
-        moveVector.normalize();
-        const delta = moveVector.clone().multiplyScalar(speed);
-        // Move the dot.
-        dot.position.add(delta);
-        // Also translate the camera by the same delta so the offset remains fixed.
-        camera.position.add(delta);
-        // Update the OrbitControls target.
-        controls.target.copy(dot.position);
+    window.addEventListener("keydown", (evt) => {
+      switch(evt.key) {
+        case "w": moveForward = true; break;
+        case "s": moveBackward = true; break;
+        case "a": moveLeft = true; break;
+        case "d": moveRight = true; break;
       }
-    }
+    });
+    window.addEventListener("keyup", (evt) => {
+      switch(evt.key) {
+        case "w": moveForward = false; break;
+        case "s": moveBackward = false; break;
+        case "a": moveLeft = false; break;
+        case "d": moveRight = false; break;
+      }
+    });
 
-    // ----- Projectile Logic -----
+    // ----- Key Rotation (Q & E) -----
+    // Q turns left, E turns right.
+    let turnLeft = false, turnRight = false;
+    window.addEventListener("keydown", (evt) => {
+      switch(evt.key) {
+        case "q": turnLeft = true; break;
+        case "e": turnRight = true; break;
+      }
+    });
+    window.addEventListener("keyup", (evt) => {
+      switch(evt.key) {
+        case "q": turnLeft = false; break;
+        case "e": turnRight = false; break;
+      }
+    });
+
+    // ----- Right Mouse Drag to Change Yaw & Pitch -----
+    let isRightMouseDown = false;
+    let prevMouseX = 0, prevMouseY = 0;
+    renderer.domElement.addEventListener("mousedown", (evt) => {
+      if(evt.button === 2) { // right button
+        isRightMouseDown = true;
+        prevMouseX = evt.clientX;
+        prevMouseY = evt.clientY;
+      }
+    });
+    renderer.domElement.addEventListener("mouseup", (evt) => {
+      if(evt.button === 2) {
+        isRightMouseDown = false;
+      }
+    });
+    renderer.domElement.addEventListener("mousemove", (evt) => {
+      if(isRightMouseDown) {
+        const deltaX = evt.clientX - prevMouseX;
+        const deltaY = evt.clientY - prevMouseY;
+        prevMouseX = evt.clientX;
+        prevMouseY = evt.clientY;
+
+        const rotationSpeed = 0.005;
+        // Inverted horizontal movement: dragging right increases yaw (rotates player to the right)
+        yaw += deltaX * rotationSpeed;
+        // Vertical mouse movement changes pitch (dragging up looks up)
+        pitch -= deltaY * rotationSpeed;
+
+        // Clamp pitch to avoid flipping
+        pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
+      }
+    });
+
+    // ----- Camera Setup -----
+    // We'll keep the camera behind the player (ignoring pitch for horizontal offset),
+    // and now as the camera zooms out, it also rises using a fixed vertical angle.
+    let cameraDistance = 150; // start further out
+    // Use a fixed angle (20° above horizontal) for the camera's offset.
+    const cameraAngle = THREE.Math.degToRad(20);
+    renderer.domElement.addEventListener("wheel", (evt) => {
+      cameraDistance += evt.deltaY * 0.05;
+      cameraDistance = Math.max(50, Math.min(300, cameraDistance));
+    });
+
+    // ----- Projectiles -----
     const projectiles = [];
     const gravity = 0.3;
     const bounceDamping = 0.7;
-    const friction = 0.98; // Horizontal friction on bounce
+    const friction = 0.98;
 
     function createProjectile(startPos, direction) {
       const projectileRadius = 3;
       const projectileGeo = new THREE.SphereGeometry(projectileRadius, 8, 8);
-      // Use the current dot color; enable transparency for fading.
-      const projectileMat = new THREE.MeshLambertMaterial({ color: currentDotColor, transparent: true, opacity: 1 });
+      const projectileMat = new THREE.MeshLambertMaterial({
+        color: currentDotColor,
+        transparent: true,
+        opacity: 1
+      });
       const projectileMesh = new THREE.Mesh(projectileGeo, projectileMat);
       projectileMesh.position.copy(startPos);
 
-      // Give the projectile an initial speed.
       const projectileSpeed = 15;
       const velocity = direction.clone().multiplyScalar(projectileSpeed);
 
       const projectile = {
         mesh: projectileMesh,
-        velocity: velocity,
+        velocity,
         bounceCount: 0,
         radius: projectileRadius
       };
-
       projectiles.push(projectile);
       scene.add(projectileMesh);
     }
 
-    // On a left click, shoot a projectile from the player's dot.
-    renderer.domElement.addEventListener('click', (event) => {
-      // Calculate normalized device coordinates.
+    renderer.domElement.addEventListener("click", (evt) => {
+      // Fire a projectile on left-click (ignore if right mouse is down)
+      if(isRightMouseDown) return;
+
       const rect = renderer.domElement.getBoundingClientRect();
       const mouse = new THREE.Vector2(
-        ((event.clientX - rect.left) / rect.width) * 2 - 1,
-        -((event.clientY - rect.top) / rect.height) * 2 + 1
+        ((evt.clientX - rect.left) / rect.width) * 2 - 1,
+        -((evt.clientY - rect.top) / rect.height) * 2 + 1
       );
-
-      // Set up a raycaster using the mouse coordinates.
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, camera);
 
-      // Define a ground plane at y = 0.
-      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
       const intersectionPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
 
-      // Determine the direction from the player's dot to the intersection point.
-      const projectileDirection = new THREE.Vector3().subVectors(intersectionPoint, dot.position).normalize();
-      // Add an upward boost so the projectile makes a nice arc.
-      projectileDirection.y += 0.3;
-      projectileDirection.normalize();
+      const projectileDir = new THREE.Vector3().subVectors(intersectionPoint, dot.position);
+      projectileDir.y += 5; // slight upward boost
+      projectileDir.normalize();
 
-      createProjectile(dot.position.clone(), projectileDirection);
+      createProjectile(dot.position.clone(), projectileDir);
     });
 
-    // Update each projectile's motion.
     function updateProjectiles() {
-      for (let i = projectiles.length - 1; i >= 0; i--) {
+      for(let i=projectiles.length-1; i>=0; i--) {
         const p = projectiles[i];
-        // Apply gravity.
         p.velocity.y -= gravity;
-        // Update position.
         p.mesh.position.add(p.velocity);
 
-        // Check collision with the ground.
-        if (p.mesh.position.y <= p.radius) {
+        // Bounce on ground
+        if(p.mesh.position.y <= p.radius) {
           p.mesh.position.y = p.radius;
           p.velocity.y = -p.velocity.y * bounceDamping;
           p.velocity.x *= friction;
           p.velocity.z *= friction;
           p.bounceCount++;
-
-          // After a few bounces, start fading out the projectile.
-          if (p.bounceCount >= 3) {
+          if(p.bounceCount >= 3) {
             p.mesh.material.opacity -= 0.02;
           }
         }
-
-        // Remove projectile if fully faded.
-        if (p.mesh.material.opacity <= 0) {
+        if(p.mesh.material.opacity <= 0) {
           scene.remove(p.mesh);
-          projectiles.splice(i, 1);
+          projectiles.splice(i,1);
         }
       }
     }
 
-    // ----- Update Dot Color from the Color Picker -----
-    const colorPicker = document.getElementById("dotColorPicker");
-    colorPicker.addEventListener("input", (event) => {
-      currentDotColor = event.target.value;
+    // ----- Update Dot Color -----
+    document.getElementById("dotColorPicker").addEventListener("input", (evt) => {
+      currentDotColor = evt.target.value;
       dot.material.color.set(currentDotColor);
     });
 
     // ----- Animation Loop -----
     function animate() {
       requestAnimationFrame(animate);
-      
-      moveDot();           // Update the player dot (and camera) position.
-      updateProjectiles(); // Update any active projectiles.
 
-      controls.update();
+      updatePlayerAndCamera();
+      updateProjectiles();
+
       renderer.render(scene, camera);
     }
-
     animate();
 
-    // ----- Window Resize Handling -----
+    // ----- Player & Camera Update -----
+    function updatePlayerAndCamera() {
+      // Incorporate key rotation (Q/E) with increased speed and inverted:
+      const keyRotationSpeed = 0.04;
+      if(turnLeft) { yaw -= keyRotationSpeed; }
+      if(turnRight) { yaw += keyRotationSpeed; }
+
+      // 1) Compute the full forward vector (yaw + pitch)
+      //    yaw=0 => forward is -Z, pitch=0 => horizontal
+      const forwardVector = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        -Math.cos(yaw) * Math.cos(pitch)
+      );
+
+      // 2) Compute the right vector by crossing with worldUp = (0,1,0)
+      const worldUp = new THREE.Vector3(0,1,0);
+      const rightVector = new THREE.Vector3().crossVectors(forwardVector, worldUp).normalize();
+
+      // 3) Move the player using WASD (only horizontal movement)
+      if(moveForward) dot.position.add(forwardVector.clone().setY(0).normalize().multiplyScalar(moveSpeed));
+      if(moveBackward) dot.position.sub(forwardVector.clone().setY(0).normalize().multiplyScalar(moveSpeed));
+      if(moveRight) dot.position.add(rightVector.clone().setY(0).normalize().multiplyScalar(moveSpeed));
+      if(moveLeft) dot.position.sub(rightVector.clone().setY(0).normalize().multiplyScalar(moveSpeed));
+
+      // 4) Update camera (ignoring pitch so it stays behind the player)
+      const flatForward = new THREE.Vector3(forwardVector.x, 0, forwardVector.z).normalize();
+      const camX = dot.position.x - flatForward.x * cameraDistance;
+      const camZ = dot.position.z - flatForward.z * cameraDistance;
+      // Here, as the camera zooms out, we compute the camera height based on a fixed angle.
+      const camY = dot.position.y + cameraDistance * Math.tan(cameraAngle);
+      camera.position.set(camX, camY, camZ);
+      camera.lookAt(dot.position);
+
+      // 5) Update the arrow to show the full 3D orientation
+      arrowHelper.position.copy(dot.position);
+      arrowHelper.setDirection(forwardVector);
+      arrowHelper.setLength(50);
+    }
+
+    // ----- Resize Handling -----
     window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
