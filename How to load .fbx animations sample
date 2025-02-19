@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FBX Model with 3rd Person Controls and Running Animation</title>
+  <title>FBX Model with 3rd Person Controls, Running & Jump Animations</title>
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; }
@@ -25,7 +25,7 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xa0a0a0);
     
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -62,7 +62,10 @@
     // PLAYER & ANIMATION VARIABLES
     let player = null;
     let mixer = null;
-    let idleAction, runAction, activeAction;
+    let idleAction, runAction, jumpAction, activeAction;
+    let isJumping = false;
+    // flag to ensure we trigger the switch only once per jump
+    let jumpSwitchTriggered = false;
     
     // MOVEMENT CONTROLS
     const keys = { w: false, a: false, s: false, d: false };
@@ -97,6 +100,14 @@
         case 'KeyA': keys.a = true; break;
         case 'KeyS': keys.s = true; break;
         case 'KeyD': keys.d = true; break;
+        case 'Space':
+          // Trigger jump if not already jumping and jumpAction is loaded
+          if (!isJumping && jumpAction) {
+            isJumping = true;
+            jumpSwitchTriggered = false;
+            switchAction(jumpAction, 0); // instant switch into jump
+          }
+          break;
       }
     });
     
@@ -109,14 +120,16 @@
       }
     });
     
-    // Function to switch animations immediately without a T-pose flash
-    function switchAction(newAction) {
+    /**
+     * Switch animations, optionally specifying a short crossfade duration.
+     * @param {THREE.AnimationAction} newAction
+     * @param {number} [fadeDuration=0]
+     */
+    function switchAction(newAction, fadeDuration = 0) {
       if (activeAction === newAction) return;
-      // Start the new action
       newAction.reset().play();
-      // Immediately crossfade from the currently active action to the new action (zero duration)
       if (activeAction) {
-        activeAction.crossFadeTo(newAction, 0, false);
+        activeAction.crossFadeTo(newAction, fadeDuration, false);
       }
       activeAction = newAction;
     }
@@ -124,7 +137,7 @@
     // LOAD THE IDLE FBX MODEL (Player)
     const loader = new THREE.FBXLoader();
     loader.load(
-      'https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/Idle.fbx',
+      'https://raw.githubusercontent.com/NoLimitNexus/Utilities/main/Idle.fbx',
       function (object) {
         player = object;
         player.scale.set(0.01, 0.01, 0.01);
@@ -141,24 +154,19 @@
           console.log('No idle animations found');
         }
         
-        // After loading idle, load the running animation
+        // LOAD THE RUNNING ANIMATION
         loader.load(
-          'https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/Running.fbx',
+          'https://raw.githubusercontent.com/NoLimitNexus/Utilities/main/Running.fbx',
           function (runObject) {
             if (runObject.animations && runObject.animations.length > 0) {
-              // Retrieve the running animation clip
               let runClip = runObject.animations[0];
-              // Remove any 'mixamorig:' prefix from track names if present
               runClip.tracks.forEach(track => {
                 if (track.name.startsWith('mixamorig:')) {
                   track.name = track.name.replace('mixamorig:', '');
                 }
               });
-              // Create the running action from the modified clip
               runAction = mixer.clipAction(runClip);
-              // Ensure the running animation loops (if desired)
               runAction.setLoop(THREE.LoopRepeat);
-              // It will be triggered during movement without being played immediately
             } else {
               console.log('No running animations found');
             }
@@ -168,6 +176,33 @@
           },
           function (error) {
             console.error('Error loading running animation:', error);
+          }
+        );
+        
+        // LOAD THE JUMP ANIMATION
+        loader.load(
+          'https://raw.githubusercontent.com/NoLimitNexus/Utilities/main/Jump.fbx',
+          function (jumpObject) {
+            if (jumpObject.animations && jumpObject.animations.length > 0) {
+              let jumpClip = jumpObject.animations[0];
+              jumpClip.tracks.forEach(track => {
+                if (track.name.startsWith('mixamorig:')) {
+                  track.name = track.name.replace('mixamorig:', '');
+                }
+              });
+              jumpAction = mixer.clipAction(jumpClip);
+              // Play once; we don't clamp the final frame.
+              jumpAction.setLoop(THREE.LoopOnce);
+              jumpAction.clampWhenFinished = false;
+            } else {
+              console.log('No jump animations found');
+            }
+          },
+          function (xhr) {
+            console.log('Jump animation: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+          },
+          function (error) {
+            console.error('Error loading jump animation:', error);
           }
         );
       },
@@ -204,19 +239,30 @@
           player.position.add(moveDir.multiplyScalar(moveSpeed * delta));
         }
         
-        // Switch animations based on movement state using immediate crossfade
-        if (runAction && idleAction) {
+        // If currently jumping, check if we're near the end of the jump animation.
+        if (isJumping && activeAction === jumpAction && jumpAction.getClip()) {
+          const jumpDuration = jumpAction.getClip().duration;
+          // If we're within 0.1 seconds of the end and haven't triggered the switch yet:
+          if (!jumpSwitchTriggered && jumpAction.time >= jumpDuration - 0.1) {
+            jumpSwitchTriggered = true;
+            isJumping = false;
+            // Crossfade into run or idle (with a short fade) before the T-pose appears.
+            switchAction((keys.w || keys.a || keys.s || keys.d) ? runAction : idleAction, 0.1);
+          }
+        }
+        // Only switch between idle and running if not jumping.
+        if (!isJumping && runAction && idleAction) {
           if (moving && activeAction !== runAction) {
-            switchAction(runAction);
+            switchAction(runAction, 0);
           } else if (!moving && activeAction !== idleAction) {
-            switchAction(idleAction);
+            switchAction(idleAction, 0);
           }
         }
         
-        // Rotate the player to match the camera's horizontal (yaw) direction
+        // Rotate the player to match the camera's horizontal (yaw) direction.
         player.rotation.y = cameraYaw;
         
-        // Update the third person camera position
+        // Update the third person camera position.
         const offsetX = Math.sin(cameraYaw) * cameraDistance * Math.cos(cameraPitch);
         const offsetZ = Math.cos(cameraYaw) * cameraDistance * Math.cos(cameraPitch);
         const offsetY = cameraHeight + cameraDistance * Math.sin(cameraPitch);
@@ -225,7 +271,7 @@
           player.position.y + offsetY,
           player.position.z - offsetZ
         );
-        // Look at a point slightly above the player
+        // Look at a point slightly above the player.
         camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
       }
       
@@ -235,7 +281,7 @@
     
     // HANDLE WINDOW RESIZE
     window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
