@@ -18,6 +18,8 @@
   <script src="https://unpkg.com/fflate@0.7.1/umd/index.js"></script>
   <script src="https://unpkg.com/three@0.134.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.134.0/examples/js/loaders/FBXLoader.js"></script>
+  <!-- Optional: Include SkeletonUtils for retargeting if needed -->
+  <script src="https://unpkg.com/three@0.134.0/examples/js/utils/SkeletonUtils.js"></script>
   <script>
     // SCENE SETUP
     const scene = new THREE.Scene();
@@ -60,7 +62,7 @@
     // PLAYER & ANIMATION VARIABLES
     let player = null;
     let mixer = null;
-    let idleAction, runAction, activeAction, previousAction;
+    let idleAction, runAction, activeAction;
     
     // MOVEMENT CONTROLS
     const keys = { w: false, a: false, s: false, d: false };
@@ -107,15 +109,16 @@
       }
     });
     
-    // Function to handle animation crossfade between actions
-    function fadeToAction(newAction, duration) {
+    // Function to switch animations immediately without a T-pose flash
+    function switchAction(newAction) {
       if (activeAction === newAction) return;
-      previousAction = activeAction;
-      activeAction = newAction;
-      if (previousAction) {
-        previousAction.fadeOut(duration);
+      // Start the new action
+      newAction.reset().play();
+      // Immediately crossfade from the currently active action to the new action (zero duration)
+      if (activeAction) {
+        activeAction.crossFadeTo(newAction, 0, false);
       }
-      activeAction.reset().fadeIn(duration).play();
+      activeAction = newAction;
     }
     
     // LOAD THE IDLE FBX MODEL (Player)
@@ -143,15 +146,19 @@
           'https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/Running.fbx',
           function (runObject) {
             if (runObject.animations && runObject.animations.length > 0) {
-              runAction = mixer.clipAction(runObject.animations[0]);
-              runAction.play();
-              runAction.weight = 0;
-              // IMPORTANT:
-              // A T-pose typically indicates that the running animation’s bone data
-              // isn’t affecting the model. This usually means that the running FBX’s
-              // skeleton (bone names/hierarchy) doesn’t match the idle FBX’s skeleton.
-              // Ensure both animations share the same bone names and structure,
-              // or retarget the animation so it applies correctly.
+              // Retrieve the running animation clip
+              let runClip = runObject.animations[0];
+              // Remove any 'mixamorig:' prefix from track names if present
+              runClip.tracks.forEach(track => {
+                if (track.name.startsWith('mixamorig:')) {
+                  track.name = track.name.replace('mixamorig:', '');
+                }
+              });
+              // Create the running action from the modified clip
+              runAction = mixer.clipAction(runClip);
+              // Ensure the running animation loops (if desired)
+              runAction.setLoop(THREE.LoopRepeat);
+              // It will be triggered during movement without being played immediately
             } else {
               console.log('No running animations found');
             }
@@ -197,12 +204,12 @@
           player.position.add(moveDir.multiplyScalar(moveSpeed * delta));
         }
         
-        // Switch animations based on movement state
+        // Switch animations based on movement state using immediate crossfade
         if (runAction && idleAction) {
           if (moving && activeAction !== runAction) {
-            fadeToAction(runAction, 0.2);
+            switchAction(runAction);
           } else if (!moving && activeAction !== idleAction) {
-            fadeToAction(idleAction, 0.2);
+            switchAction(idleAction);
           }
         }
         
