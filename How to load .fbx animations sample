@@ -1,82 +1,237 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FBX Model with Animations</title>
-    <style>
-        body { margin: 0; }
-        canvas { display: block; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FBX Model with 3rd Person Controls and Running Animation</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
 </head>
 <body>
-    <!-- 
+  <!-- 
     NOTES:
-    - Include fflate.min.js before FBXLoader, as it’s required for decompression of FBX files.
-    - Load Three.js and FBXLoader from a reliable CDN to avoid 404 errors.
-    -->
-    <script src="https://unpkg.com/fflate@0.7.1/umd/index.js"></script>
-    <script src="https://unpkg.com/three@0.134.0/build/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.134.0/examples/js/loaders/FBXLoader.js"></script>
-    <script>
-        // Scene setup
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 5, 10); // Adjust camera position to view the model
-
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        // Add lighting to the scene
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(5, 10, 7.5);
-        scene.add(directionalLight);
-
-        // Load the FBX model using FBXLoader (ensure it’s the correct loader for FBX files)
-        const loader = new THREE.FBXLoader();
-        let mixer; // For handling animations
-
-        loader.load(
-            'https://raw.githack.com/NoLimitNexus/Utilities/main/Idle.fbx', // Use the correct model URL
-            function (object) {
-                scene.add(object);
-
-                // Adjust scale (FBX models often need scaling to fit the scene)
-                object.scale.set(0.01, 0.01, 0.01); // Adjust this value based on your model’s size
-
-                // Center the model in the scene
-                object.position.set(0, 0, 0);
-
-                // Check for and play animations if present
-                if (object.animations && object.animations.length > 0) {
-                    mixer = new THREE.AnimationMixer(object);
-                    const action = mixer.clipAction(object.animations[0]);
-                    action.play();
-                    console.log('Animation playing');
-                } else {
-                    console.log('No animations found');
-                }
-            },
-            function (xhr) {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-            },
-            function (error) {
-                console.error('Error loading model:', error);
-            }
-        );
-
-        // Animation loop to render the scene and update animations
-        const clock = new THREE.Clock();
-        function animate() {
-            requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            if (mixer) mixer.update(delta); // Update animations if mixer exists
-            renderer.render(scene, camera);
+    - Include fflate.min.js before FBXLoader, as it’s required for decompression.
+    - Load Three.js and FBXLoader from reliable CDNs.
+  -->
+  <script src="https://unpkg.com/fflate@0.7.1/umd/index.js"></script>
+  <script src="https://unpkg.com/three@0.134.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.134.0/examples/js/loaders/FBXLoader.js"></script>
+  <script>
+    // SCENE SETUP
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xa0a0a0);
+    
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    
+    // LIGHTS
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 10, 7.5);
+    scene.add(directionalLight);
+    
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+    hemiLight.position.set(0, 200, 0);
+    scene.add(hemiLight);
+    
+    const pointLight = new THREE.PointLight(0xffffff, 0.8);
+    pointLight.position.set(0, 10, 0);
+    scene.add(pointLight);
+    
+    // LARGE VISIBLE GROUND
+    const groundGeometry = new THREE.PlaneGeometry(500, 500);
+    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x707070 });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    
+    // Grid Helper for visual reference
+    const gridHelper = new THREE.GridHelper(500, 50);
+    scene.add(gridHelper);
+    
+    // PLAYER & ANIMATION VARIABLES
+    let player = null;
+    let mixer = null;
+    let idleAction, runAction, activeAction, previousAction;
+    
+    // MOVEMENT CONTROLS
+    const keys = { w: false, a: false, s: false, d: false };
+    const moveSpeed = 5; // units per second
+    
+    // CAMERA CONTROL VARIABLES FOR THIRD PERSON VIEW
+    let cameraYaw = 0;     // horizontal angle (radians)
+    let cameraPitch = 0.3; // vertical angle (radians)
+    const cameraDistance = 10; // distance behind the player
+    const cameraHeight = 5;    // base height offset from the player
+    
+    // POINTER LOCK FOR MOUSE LOOK
+    renderer.domElement.addEventListener('click', () => {
+      renderer.domElement.requestPointerLock();
+    });
+    
+    // MOUSE LOOK (with inverted vertical movement)
+    document.addEventListener('mousemove', (event) => {
+      if (document.pointerLockElement === renderer.domElement) {
+        const sensitivity = 0.002;
+        cameraYaw -= event.movementX * sensitivity;
+        // Invert the vertical look: add event.movementY instead of subtracting
+        cameraPitch += event.movementY * sensitivity;
+        cameraPitch = Math.max(-0.5, Math.min(0.8, cameraPitch));
+      }
+    });
+    
+    // KEYBOARD INPUT
+    document.addEventListener('keydown', (event) => {
+      switch(event.code) {
+        case 'KeyW': keys.w = true; break;
+        case 'KeyA': keys.a = true; break;
+        case 'KeyS': keys.s = true; break;
+        case 'KeyD': keys.d = true; break;
+      }
+    });
+    
+    document.addEventListener('keyup', (event) => {
+      switch(event.code) {
+        case 'KeyW': keys.w = false; break;
+        case 'KeyA': keys.a = false; break;
+        case 'KeyS': keys.s = false; break;
+        case 'KeyD': keys.d = false; break;
+      }
+    });
+    
+    // Function to handle animation crossfade between actions
+    function fadeToAction(newAction, duration) {
+      if (activeAction === newAction) return;
+      previousAction = activeAction;
+      activeAction = newAction;
+      if (previousAction) {
+        previousAction.fadeOut(duration);
+      }
+      activeAction.reset().fadeIn(duration).play();
+    }
+    
+    // LOAD THE IDLE FBX MODEL (Player)
+    const loader = new THREE.FBXLoader();
+    loader.load(
+      'https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/Idle.fbx',
+      function (object) {
+        player = object;
+        player.scale.set(0.01, 0.01, 0.01);
+        player.position.set(0, 0, 0);
+        scene.add(player);
+        
+        // Create mixer and idle action
+        mixer = new THREE.AnimationMixer(player);
+        if (object.animations && object.animations.length > 0) {
+          idleAction = mixer.clipAction(object.animations[0]);
+          idleAction.play();
+          activeAction = idleAction;
+        } else {
+          console.log('No idle animations found');
         }
-        animate();
-    </script>
+        
+        // After loading idle, load the running animation
+        loader.load(
+          'https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/Running.fbx',
+          function (runObject) {
+            if (runObject.animations && runObject.animations.length > 0) {
+              runAction = mixer.clipAction(runObject.animations[0]);
+              runAction.play();
+              runAction.weight = 0;
+              // IMPORTANT:
+              // A T-pose typically indicates that the running animation’s bone data
+              // isn’t affecting the model. This usually means that the running FBX’s
+              // skeleton (bone names/hierarchy) doesn’t match the idle FBX’s skeleton.
+              // Ensure both animations share the same bone names and structure,
+              // or retarget the animation so it applies correctly.
+            } else {
+              console.log('No running animations found');
+            }
+          },
+          function (xhr) {
+            console.log('Running animation: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+          },
+          function (error) {
+            console.error('Error loading running animation:', error);
+          }
+        );
+      },
+      function (xhr) {
+        console.log('Idle model: ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+      },
+      function (error) {
+        console.error('Error loading idle model:', error);
+      }
+    );
+    
+    // ANIMATION & RENDER LOOP
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      
+      if (mixer) mixer.update(delta);
+      
+      if (player) {
+        // Calculate movement direction based on camera yaw
+        const forward = new THREE.Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+        const right = new THREE.Vector3(Math.sin(cameraYaw - Math.PI / 2), 0, Math.cos(cameraYaw - Math.PI / 2));
+        const moveDir = new THREE.Vector3();
+        
+        if (keys.w) moveDir.add(forward);
+        if (keys.s) moveDir.sub(forward);
+        if (keys.a) moveDir.sub(right);
+        if (keys.d) moveDir.add(right);
+        
+        const moving = moveDir.length() > 0;
+        if (moving) {
+          moveDir.normalize();
+          player.position.add(moveDir.multiplyScalar(moveSpeed * delta));
+        }
+        
+        // Switch animations based on movement state
+        if (runAction && idleAction) {
+          if (moving && activeAction !== runAction) {
+            fadeToAction(runAction, 0.2);
+          } else if (!moving && activeAction !== idleAction) {
+            fadeToAction(idleAction, 0.2);
+          }
+        }
+        
+        // Rotate the player to match the camera's horizontal (yaw) direction
+        player.rotation.y = cameraYaw;
+        
+        // Update the third person camera position
+        const offsetX = Math.sin(cameraYaw) * cameraDistance * Math.cos(cameraPitch);
+        const offsetZ = Math.cos(cameraYaw) * cameraDistance * Math.cos(cameraPitch);
+        const offsetY = cameraHeight + cameraDistance * Math.sin(cameraPitch);
+        camera.position.set(
+          player.position.x - offsetX,
+          player.position.y + offsetY,
+          player.position.z - offsetZ
+        );
+        // Look at a point slightly above the player
+        camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
+      }
+      
+      renderer.render(scene, camera);
+    }
+    animate();
+    
+    // HANDLE WINDOW RESIZE
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
 </body>
 </html>
