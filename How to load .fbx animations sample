@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FBX Model with Animations</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- 
+    NOTES:
+    - Include fflate.min.js before FBXLoader, as it’s required for decompression of FBX files.
+    - Load Three.js and FBXLoader from a reliable CDN to avoid 404 errors.
+    -->
+    <script src="https://unpkg.com/fflate@0.7.1/umd/index.js"></script>
+    <script src="https://unpkg.com/three@0.134.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.134.0/examples/js/loaders/FBXLoader.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 10); // Adjust camera position to view the model
+
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Add lighting to the scene
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // Load the FBX model using FBXLoader (ensure it’s the correct loader for FBX files)
+        const loader = new THREE.FBXLoader();
+        let mixer; // For handling animations
+
+        loader.load(
+            'https://raw.githack.com/NoLimitNexus/Utilities/main/Idle.fbx', // Use the correct model URL
+            function (object) {
+                scene.add(object);
+
+                // Adjust scale (FBX models often need scaling to fit the scene)
+                object.scale.set(0.01, 0.01, 0.01); // Adjust this value based on your model’s size
+
+                // Center the model in the scene
+                object.position.set(0, 0, 0);
+
+                // Check for and play animations if present
+                if (object.animations && object.animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(object);
+                    const action = mixer.clipAction(object.animations[0]);
+                    action.play();
+                    console.log('Animation playing');
+                } else {
+                    console.log('No animations found');
+                }
+            },
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+            function (error) {
+                console.error('Error loading model:', error);
+            }
+        );
+
+        // Animation loop to render the scene and update animations
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta); // Update animations if mixer exists
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
