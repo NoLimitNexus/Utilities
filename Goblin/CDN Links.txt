@@ -1,9 +1,0 @@
-Standing Idle - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinidle.fbx
-Walking       - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinwalking.fbx
-Running       - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinrunning.fbx
-Jump          - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinjump.fbx
-
-Swim/Idle     - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblimswimmingidle.fbx
-Swim forward  - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinswimming.fbx
-Swim Fast     - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinswimmingfast.fbx
-Landing       - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/goblinflipland.fbx
