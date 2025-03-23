@@ -1,0 +1,7 @@
+Cast forward - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeleton2hcastforward.fbx
+Death - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletondeath1.fbx
+idle - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletondrunkidle.fbx
+run - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletondrunkrun.fbx
+walk - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletondrunkwalk.fbx
+take damage - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletontakedamage1.fbx
+jump - https://raw.githack.com/NoLimitNexus/Utilities/refs/heads/main/skeletonjump.fbx
